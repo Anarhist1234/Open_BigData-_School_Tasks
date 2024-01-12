@@ -1,0 +1,174 @@
+WITH get_company_industies AS (
+        SELECT
+                i.id,
+                i.name,
+                i.category_id,
+                i.link,
+                i.ceo_text,
+                i.ceo_header,
+                i.title,
+                i.description,
+                i.h1,
+                COALESCE(count(v.id), 0) as count_vacancies,
+                c.id as company_id,
+                row_number() OVER (partition by i.id order by count(v.id) desc) as count_industries
+        FROM
+                industry as i
+        LEFT OUTER JOIN
+                company_industries as ci on ci.industry_id = i.id
+        LEFT OUTER JOIN --
+                company as c on ci.company_id = c.id
+        INNER JOIN --INNER JOIN
+                vacancies as v
+        ON v.company_id = c.id
+        GROUP BY
+                i.id,
+                i.name,
+                i.link,
+                i.category_id,
+                c.id,
+                i.ceo_text,
+                i.ceo_header,
+                i.title,
+                i.description,
+                i.h1
+        HAVING count(v.id) > 0
+        ORDER BY i.id
+    ),
+
+get_logo_url_company as (
+        SELECT
+                c.id, url
+        FROM
+                company as c
+        LEFT OUTER JOIN
+                company_images as company_images_1
+                ON c.id = company_images_1.company_id
+        JOIN -- INNER JOIN
+                images
+                ON images.id = company_images_1.image_id and images.type = 'LOGO'
+    ),
+
+company_random_sotring_top AS (
+        SELECT
+               gci.id,
+               gci.name,
+               gci.category_id,
+               gci.link,
+               gci.ceo_text,
+               gci.ceo_header,
+               gci.title,
+               gci.description,
+               gci.h1,
+               gci.count_vacancies,
+               gci.company_id,
+               gci.count_industries,
+               gci.r_num
+        FROM
+            (SELECT
+               get_company_industies.id,
+               get_company_industies.name,
+               get_company_industies.category_id,
+               get_company_industies.link,
+               get_company_industies.ceo_text,
+               get_company_industies.ceo_header,
+               get_company_industies.title,
+               get_company_industies.description,
+               get_company_industies.h1,
+               get_company_industies.count_vacancies,
+               get_company_industies.company_id,
+               get_company_industies.count_industries,
+               row_number() OVER (PARTITION BY  id ORDER BY random()) AS r_num
+               FROM get_company_industies
+               WHERE get_company_industies.count_industries between 0 and 10
+            ) as gci
+        WHERE
+            gci.r_num <=3
+    ),
+
+/*company_limit AS (
+        SELECT
+               cst.id,
+               cst.name,
+               cst.category_id,
+               cst.link,
+               cst.ceo_text,
+               cst.ceo_header,
+               cst.title,
+               cst.description,
+               cst.h1,
+               cst.count_vacancies,
+               cst.company_id,
+               cst.count_industries,
+               cst.r_num
+        FROM
+            company_random_sotring_top as cst
+        WHERE
+            r_num <= 3
+    ),*/
+
+sub_industry_agg as (
+        SELECT
+                cst.id,
+                cst.name,
+                cst.link,
+                cst.ceo_header,
+                cst.ceo_text,
+                cst.title,
+                cst.description,
+                cst.h1,
+                cst.category_id,
+                json_agg(
+                    json_build_object(
+                        'id', cst.company_id,
+                        'name', c.name,
+                        'logo', url,
+                        'count_vacancies', count_vacancies
+                                     )
+                        ) as companies
+        FROM
+            company_random_sotring_top as cst
+        INNER JOIN --INNER JOIN
+            company as c
+            ON c.id = cst.company_id
+        LEFT OUTER JOIN
+                get_logo_url_company as glur
+                ON cst.company_id = glur.id
+        GROUP BY
+                cst.id,
+                cst.name,
+                cst.link,
+                cst.category_id,
+                cst.ceo_header,
+                cst.ceo_text,
+                cst.title,
+                cst.description,
+                cst.h1
+    )
+
+    SELECT
+            ic.id,
+            ic.name,
+            ic.ceo_text,
+            ic.hh_name,
+            ic.title,
+            ic.h1,
+            ic.description,
+            ic.ceo_header,
+            ic.icon,
+            json_agg(sia.*) as industries
+    FROM
+            sub_industry_agg as sia
+    LEFT OUTER JOIN
+            industry_category as ic
+            ON ic.id = sia.category_id
+    GROUP BY
+            ic.id,
+            ic.name,
+            ic.link,
+            ic.ceo_header,
+            ic.ceo_text,
+            ic.title,
+            ic.h1,
+            ic.description,
+            ic.icon;

@@ -1,0 +1,37 @@
+WITH lead_table AS(
+    SELECT sh.user_id,
+           sh.created_at,
+           LEAD(sh.created_at) OVER (partition by user_id order by created_at) as ldt
+    FROM statuses_histories as sh
+    WHERE sh.created_at > current_timestamp - interval '1 hour' and sh.created_at < current_timestamp
+),
+ user_col as(
+     select user_id, project_id
+     FROM calls
+),
+
+avg_sec AS (
+     SELECT ld.user_id,
+            ld.created_at::date,
+            ld.ldt,
+            ROUND(EXTRACT(SECONDS FROM ld.ldt - ld.created_at),2) as dif_sec
+            FROM lead_table as ld
+            WHERE ld.ldt is not null
+),
+
+avg_for_each_day AS (
+    SELECT uc.project_id, avs.created_at, AVG(avs.dif_sec) as avg_total
+    FROM avg_sec as avs
+    INNER JOIN user_col as uc
+    ON avs.user_id = uc.user_id
+    GROUP BY avs.created_at, uc.project_id
+
+)
+
+SELECT c.project_id,
+       ROUND(afd.avg_total,2),
+       count(c.*)
+FROM avg_for_each_day afd
+left join calls c on afd.project_id = c.project_id
+where c.created_at > current_timestamp - interval '1 minute' and c.created_at < current_timestamp
+group by c.project_id,  afd.avg_total
